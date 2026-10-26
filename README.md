@@ -1,17 +1,22 @@
 # devicehub-ax
 
-A tiny command-line tool that presses buttons in Xcode's **Device Hub** (and any other macOS app) through the accessibility API.
+A small command-line tool that drives Xcode's **Device Hub** and the app on the simulator through the accessibility API. It is built for scripts and coding agents.
 
-Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls, such as the iPhone Duo poses (Closed, Partially Open, Open), have no `simctl` or `devicectl` equivalent. `ax` lets scripts and coding agents press them, and press buttons inside the app running on the simulator too.
+Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls have no `simctl` or `devicectl` equivalent, such as the iPhone Duo poses (Closed, Partially Open, Open). Tools that inject touches, such as AXe and idb, land on the Duo's outer screen even when it is open. `ax` presses Device Hub's buttons and the app's own elements, on either screen, and confirms each action.
 
 ```bash
-ax pose open                      # unfold the iPhone Duo simulator
-ax press "Rotate Right"           # any Device Hub button by its label
-ax press Progress --role AXRadio  # a tab in the app running on the simulator
-ax list | grep AXButton           # see what can be pressed
+ax doctor                    # check access, Device Hub and the booted simulator
+ax pose open                 # unfold the iPhone Duo; returns once the inner display is on
+ax tap Progress              # press an element of the app by its label
+ax wait "PAST 7 DAYS"        # wait for the next screen
+ax screenshot progress.jpg   # the active display, ready for App Store Connect
 ```
 
-Using `ax` from a coding agent? See [AGENTS.md](AGENTS.md) for commands, Device Hub labels and gotchas in one place.
+- **No private frameworks.** It uses the accessibility API, `simctl` and `devicectl` only.
+- **Confirmed actions.** `pose` and `rotate` wait until devicectl reports the new state, and fail with exit code 5 if it never arrives.
+- **Made for agents.** Every command takes `--json`, and each kind of failure has its own exit code. A failed `tap` lists the closest labels on the screen, and when a label matches two different elements, `ax` reports both instead of picking one.
+
+Coding agents: read [AGENTS.md](AGENTS.md), or install the skill with `npx skills add hipporasy/devicehub-ax`.
 
 ## Install
 
@@ -22,7 +27,7 @@ Grab `ax-macos-universal.zip` from the [latest release](https://github.com/hippo
 ```bash
 curl -fL -o ax.zip https://github.com/hipporasy/devicehub-ax/releases/latest/download/ax-macos-universal.zip
 unzip ax.zip && xattr -d com.apple.quarantine ax 2>/dev/null
-mv ax /usr/local/bin/
+mv ax /usr/local/bin/   # or mkdir -p ~/.local/bin && mv ax ~/.local/bin/
 ```
 
 The binary is ad-hoc signed, not notarized. Downloads made with `curl` are not quarantined; one saved from a browser is, which is what the `xattr` line clears.
@@ -43,50 +48,40 @@ Then give the terminal app you run it from (Terminal, iTerm, Ghostty, your IDE) 
 ## Usage
 
 ```
-ax list [--app NAME | --pid PID] [--role ROLES]
-ax press LABEL [--app NAME | --pid PID] [--role ROLES]
-ax pose closed|partial|open [--app NAME | --pid PID]
+ax doctor                       check access, Device Hub, its windows and booted simulators
+ax state                        device, pose, orientation and displays
+ax pose closed|partial|open     fold or unfold an iPhone Duo, confirmed
+ax rotate [TIMES]               press Rotate Right, confirmed
+ax screenshot PATH              capture the active display (--display inner|outer|ID)
+ax controls | control LABEL     list or press Device Hub's buttons under the device
+ax screen                       list the elements on the device's screen
+ax tap LABEL                    press one of them
+ax wait LABEL [--gone]          wait until it appears, or disappears
+ax list | press LABEL           the raw accessibility tree of any app (--app, --pid)
 ```
 
-- `list` prints the accessibility tree, one element per line: `role | title | description | identifier | help | value selected enabled`.
-- `press` presses the first element whose title, description, identifier or help equals `LABEL` and whose role matches `--role` (default `Button|Radio`).
-- `pose` presses Device Hub's Closed, Partially Open or Open button.
-- `--app` takes an executable name or bundle identifier and defaults to `DeviceHub`. `--pid` targets a process directly.
+Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--no-verify`. Run `ax --help` for the full list and the exit codes.
 
-Device Hub must have a device window open; a hidden or minimised window drops out of the accessibility tree.
-
-### Device Hub controls seen so far
-
-Home, Screenshot, Record, Rotate Right, Closed, Partially Open, Open, plus the app's own elements (tabs show up as `AXRadioButton`, buttons by their accessibility label). Run `ax list` to see what your version exposes.
-
-When a Device Hub button and an app element share a label (Device Hub's **Home** button and an app's **Home** tab), pass `--role AXRadio` to pick the tab.
+`tap` and `wait` only look at the device's screen, so an app's Home tab never clashes with Device Hub's Home button. Device Hub must have the device's window on screen: a minimised window, a window on another Space, or a locked Mac hides it from the accessibility API.
 
 ## Recipe: iPhone Duo screenshots of the inner display
 
-`simctl io screenshot` captures the outer display by default, even after the Duo is opened. Capture the inner display by its ID:
-
 ```bash
-DEVICE=<iPhone Duo simulator UDID>
+xcrun simctl status_bar booted override --time 9:41 --batteryState charged --batteryLevel 100
 ax pose open
-
-# The inner display is the one 2007 points wide (2853 x 2007 landscape)
-INNER=$(xcrun simctl io "$DEVICE" enumerate | awk '/UUID:/{id=$2} /Default width: 2007/{print id; exit}')
-
-xcrun simctl status_bar "$DEVICE" override --time 9:41 --batteryState charged --batteryLevel 100
-xcrun simctl io "$DEVICE" screenshot --display="$INNER" home.png
+ax tap Home && ax wait "THIS WEEK" && ax screenshot shots/home.jpg   # 2853 x 2007
+ax pose closed && ax screenshot shots/cover.jpg                      # 1398 x 2034
 ```
 
-App Store Connect takes these as the `APP_IPHONE_DUO` display type (2853 x 2007 or 2007 x 2853). It rejects PNGs with an alpha channel, so convert first:
-
-```bash
-sips -s format jpeg -s formatOptions 95 home.png --out home.jpg
-```
+App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (2853 x 2007 or 2007 x 2853) and rejects images with an alpha channel. `ax screenshot` writes none: a `.jpg` path gives JPEG at quality 0.95, any other path gives PNG.
 
 ## Notes
 
 - Tested with Xcode 27.1 (Device Hub) on macOS 27.
 - Device Hub reports a process ID of -1 to `NSWorkspace`, so `ax` finds it in the process table by executable name.
 - Swipes from tools such as AXe or `idb` land on the Duo's outer display; use accessibility presses for the inner display.
+- `ax tap` performs the accessibility press, so it cannot swipe, scroll or type.
+- devicectl reports no hinge angle, so `ax state` shows Partially Open and Open both as `unfolded`.
 
 ## License
 
