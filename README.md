@@ -13,7 +13,21 @@ ax list | grep AXButton           # see what can be pressed
 
 ## Install
 
-Needs macOS 13 or later and Swift 5.9 or later (Xcode's toolchain is fine).
+### Download
+
+Grab `ax-macos-universal.zip` from the [latest release](https://github.com/hipporasy/devicehub-ax/releases/latest) (Apple silicon and Intel, macOS 13 or later):
+
+```bash
+curl -fL -o ax.zip https://github.com/hipporasy/devicehub-ax/releases/latest/download/ax-macos-universal.zip
+unzip ax.zip && xattr -d com.apple.quarantine ax 2>/dev/null
+mv ax /usr/local/bin/
+```
+
+The binary is ad-hoc signed, not notarized. Downloads made with `curl` are not quarantined; one saved from a browser is, which is what the `xattr` line clears.
+
+### Build from source
+
+Needs Swift 5.9 or later (Xcode's toolchain is fine).
 
 ```bash
 git clone https://github.com/hipporasy/devicehub-ax.git
