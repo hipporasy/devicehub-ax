@@ -11,6 +11,8 @@ ax press Progress --role AXRadio  # a tab in the app running on the simulator
 ax list | grep AXButton           # see what can be pressed
 ```
 
+Using `ax` from a coding agent? See [AGENTS.md](AGENTS.md) for commands, Device Hub labels and gotchas in one place.
+
 ## Install
 
 ### Download
