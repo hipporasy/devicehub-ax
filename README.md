@@ -1,6 +1,6 @@
 # devicehub-ax
 
-Fold, rotate and tap the **iPhone Duo simulator** from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts, CI and AI coding agents such as Claude Code and Codex, and it takes App Store screenshots of the inner display.
+Fold, rotate and tap the **iPhone Duo simulator** from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts and AI coding agents such as Claude Code and Codex, and it takes App Store screenshots of the inner display.
 
 Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls have no `simctl` or `devicectl` equivalent, such as the iPhone Duo poses (Closed, Partially Open, Open). Tools that inject touches, such as AXe and idb, land on the Duo's outer screen even when it is open. `ax` presses Device Hub's buttons and the app's own elements, on either screen, and confirms each action.
 
