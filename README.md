@@ -36,6 +36,12 @@ mv ax /usr/local/bin/   # or mkdir -p ~/.local/bin && mv ax ~/.local/bin/
 
 The binary is ad-hoc signed, not notarized. Downloads made with `curl` are not quarantined; one saved from a browser is, which is what the `xattr` line clears.
 
+### Homebrew
+
+```bash
+brew install hipporasy/tap/devicehub-ax
+```
+
 ### Build from source
 
 Needs Swift 5.9 or later (Xcode's toolchain is fine).
@@ -86,6 +92,17 @@ App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (
 - Swipes from tools such as AXe or `idb` land on the Duo's outer display; use accessibility presses for the inner display.
 - `ax tap` performs the accessibility press, so it cannot swipe, scroll or type.
 - devicectl reports no hinge angle, so `ax state` shows Partially Open and Open both as `unfolded`.
+
+## Releasing
+
+Bump `version` in `Sources/ax/main.swift`, commit, then push an annotated tag whose message body is the release notes:
+
+```bash
+git tag -a v0.3.0 -m "v0.3.0" -m "What changed, in Markdown."
+git push origin v0.3.0
+```
+
+The release workflow tests and builds the universal binary, publishes the GitHub release with it, and updates the Homebrew formula.
 
 ## License
 

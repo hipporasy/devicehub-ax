@@ -1,0 +1,73 @@
+name: Release
+
+# Pushing a tag such as v0.3.0 builds the universal binary, publishes the
+# GitHub release with it, and points the Homebrew formula at it.
+# Running it by hand builds the zip as a workflow artifact without publishing.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the version matches the tag
+        if: github.event_name == 'push'
+        run: |
+          version=$(sed -n 's/^let version = "\(.*\)"/\1/p' Sources/ax/main.swift)
+          [ "v$version" = "$GITHUB_REF_NAME" ] || { echo "main.swift says $version, tag is $GITHUB_REF_NAME"; exit 1; }
+
+      - name: Test
+        run: swift test
+
+      - name: Build the universal binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          bin="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/ax"
+          lipo -archs "$bin"
+          codesign -s - -f "$bin"
+          mkdir dist && cp "$bin" dist/ax
+          (cd dist && zip -q ax-macos-universal.zip ax)
+          echo "SHA256=$(shasum -a 256 dist/ax-macos-universal.zip | cut -d' ' -f1)" >> "$GITHUB_ENV"
+          dist/ax --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ax-macos-universal
+          path: dist/ax-macos-universal.zip
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")"
+          printf '%s\n\nSHA-256 (zip): `%s`\n' "$notes" "$SHA256" > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/ax-macos-universal.zip --title "$GITHUB_REF_NAME" --notes-file notes.md
+
+      - name: Update the Homebrew formula
+        if: github.event_name == 'push'
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh && printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/tap && chmod 600 ~/.ssh/tap
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/tap -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:hipporasy/homebrew-tap.git tap
+          version="${GITHUB_REF_NAME#v}"
+          sed -i '' -E \
+            -e "s|/download/v[^/]+/|/download/v$version/|" \
+            -e "s|sha256 \"[0-9a-f]+\"|sha256 \"$SHA256\"|" \
+            -e "s|version \"[^\"]+\"|version \"$version\"|" \
+            tap/Formula/devicehub-ax.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "devicehub-ax $version"
+          git push
