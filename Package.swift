@@ -8,6 +8,7 @@ let package = Package(
         .executable(name: "ax", targets: ["ax"])
     ],
     targets: [
-        .executableTarget(name: "ax")
+        .executableTarget(name: "ax"),
+        .testTarget(name: "axTests", dependencies: ["ax"]),
     ]
 )

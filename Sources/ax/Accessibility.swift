@@ -78,8 +78,13 @@ struct Matcher {
 
 /// Labels on screen, closest to the one asked for first, so a failed press tells the caller what to try next.
 func suggestions(for label: String, among elements: [AXUIElement]) -> [String] {
+    closestLabels(to: label, among: elements.map(displayLabel))
+}
+
+/// Up to ten distinct, non-empty names, closest to `label` first. A name containing the label, or contained in it, counts as closest.
+func closestLabels(to label: String, among names: [String]) -> [String] {
     var seen = Set<String>()
-    let names = elements.map(displayLabel).filter { !$0.isEmpty && seen.insert($0).inserted }
+    let names = names.filter { !$0.isEmpty && seen.insert($0).inserted }
     let target = label.lowercased()
     func distance(_ name: String) -> Int {
         let candidate = name.lowercased()

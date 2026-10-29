@@ -279,7 +279,7 @@ func runScreen(_ options: Options) throws {
         emit(["window": window.dictionary, "elements": []], text: "")
         return
     }
-    if elements.isEmpty {
+    if window.screenElements.isEmpty {
         warn("The screen tree is empty. Wait for the app to finish launching, or bring the Device Hub window forward.")
     }
     emit(["window": window.dictionary, "elements": elements.map(summary)], text: elements.map { element in

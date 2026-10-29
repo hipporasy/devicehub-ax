@@ -56,7 +56,11 @@ func xcrun(_ arguments: [String]) throws -> Data {
 }
 
 func bootedSimulators() throws -> [Simulator] {
-    let data = try xcrun(["simctl", "list", "devices", "booted", "-j"])
+    try parseBootedSimulators(try xcrun(["simctl", "list", "devices", "booted", "-j"]))
+}
+
+/// Parses `simctl list devices booted -j`. A device listed under two runtimes appears once.
+func parseBootedSimulators(_ data: Data) throws -> [Simulator] {
     let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     let runtimes = root?["devices"] as? [String: [[String: Any]]] ?? [:]
     var seen = Set<String>()
@@ -122,7 +126,11 @@ func displays(of simulator: Simulator) throws -> [Display] {
 
 /// The device's displays and its orientation (portrait, landscapeLeft, ...), as devicectl reports them.
 func displayInfo(of simulator: Simulator) throws -> (displays: [Display], orientation: String) {
-    let data = try xcrun(["devicectl", "device", "info", "displays", "--device", simulator.identifier, "--quiet", "--json-output", "-"])
+    try parseDisplayInfo(try xcrun(["devicectl", "device", "info", "displays", "--device", simulator.identifier, "--quiet", "--json-output", "-"]))
+}
+
+/// Parses `devicectl device info displays --json-output -`.
+func parseDisplayInfo(_ data: Data) throws -> (displays: [Display], orientation: String) {
     let root = try JSONSerialization.jsonObject(with: data) as? [String: Any]
     let info = root?["result"] as? [String: Any]
     let orientation = (info?["orientation"] as? [String: Any])?["currentDeviceOrientation"] as? String ?? ""

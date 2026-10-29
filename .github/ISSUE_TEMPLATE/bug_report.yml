@@ -1,0 +1,50 @@
+name: Bug report
+description: Something ax did wrong, or a Device Hub button it can't find
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Xcode updates can rename Device Hub's buttons, so the output of `ax doctor` and `ax controls` is the most useful thing you can include.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what you expected, and what happened instead.
+      placeholder: |
+        ax pose open
+        Expected the inner display to turn on; got exit code 5, "pose_not_confirmed".
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Output with --json
+      description: Run the failing command again with `--json` and paste the output.
+      render: json
+  - type: textarea
+    id: doctor
+    attributes:
+      label: ax doctor --json
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: controls
+    attributes:
+      label: ax controls
+      description: The Device Hub buttons ax can see. Leave empty if the command fails.
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `ax --version`, and the macOS and Xcode versions.
+      placeholder: ax 0.2.1, macOS 27.0, Xcode 27.1
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Simulator
+      placeholder: iPhone Duo, iOS 27.1
