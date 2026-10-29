@@ -18,6 +18,8 @@ ax screenshot progress.jpg   # the active display, ready for App Store Connect
 
 Coding agents: read [AGENTS.md](AGENTS.md), or install the skill with `npx skills add hipporasy/devicehub-ax`.
 
+The [wiki](https://github.com/hipporasy/devicehub-ax/wiki) has the full command reference, JSON fields, troubleshooting, an App Store screenshot script and a comparison with similar tools.
+
 ## Install
 
 ### Download
