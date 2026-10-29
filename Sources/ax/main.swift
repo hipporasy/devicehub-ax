@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-let version = "0.2.1"
+let version = "0.2.2"
 
 let usage = """
 Usage: ax <command> [options]
