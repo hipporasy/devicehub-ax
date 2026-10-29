@@ -48,7 +48,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # The checkout holds the tagged commit, not the annotated tag that carries the notes.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           notes="$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")"
+          [ -n "$notes" ] || { echo "Tag $GITHUB_REF_NAME has no message body to use as release notes"; exit 1; }
           printf '%s\n\nSHA-256 (zip): `%s`\n' "$notes" "$SHA256" > notes.md
           gh release create "$GITHUB_REF_NAME" dist/ax-macos-universal.zip --title "$GITHUB_REF_NAME" --notes-file notes.md
 
