@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-let version = "0.2.0"
+let version = "0.2.1"
 
 let usage = """
 Usage: ax <command> [options]
@@ -29,7 +29,8 @@ Any app:
 
 Options:
   --json            Print one JSON object; failures print {"ok": false, "error": ..., "hint": ...}
-  --device UDID     Simulator UDID or name (default: the only booted simulator)
+  --device UDID     Simulator UDID or name. Default: $AX_DEVICE, else the only booted
+                    simulator, else the one in Device Hub's only device window
   --timeout SECS    How long to wait for an element or state (tap, control, press: 2; others: 10)
   --contains        Match labels by case-insensitive substring instead of exactly
   --role ROLES      Only match these roles, separated by |, e.g. AXRadio or Button|Radio
@@ -60,6 +61,7 @@ struct Options {
 
 func parseOptions() throws -> Options {
     var options = Options()
+    if let device = ProcessInfo.processInfo.environment["AX_DEVICE"], !device.isEmpty { options.device = device }
     var arguments = Array(CommandLine.arguments.dropFirst())
     func value(for flag: String) throws -> String {
         guard let value = arguments.first else { throw Failure(.usage, "usage", "\(flag) needs a value") }
@@ -112,7 +114,8 @@ func notFound(_ matcher: Matcher, in scope: String, among elements: [AXUIElement
 
 /// Waits for a pressable, enabled element that `matcher` accepts among `candidates()`, then presses it.
 /// With `unique`, buttons and tabs win over static text, and two different elements matching is an error rather than a guess.
-func pressFirst(_ matcher: Matcher, in scope: String, timeout: Double, unique: Bool = false, candidates: () throws -> [AXUIElement]) throws -> AXUIElement {
+/// Returns the pressed element's summary, read before the press, and whether only a screen change confirmed it.
+func pressFirst(_ matcher: Matcher, in scope: String, timeout: Double, unique: Bool = false, candidates: () throws -> [AXUIElement]) throws -> (element: [String: Any], changedScreen: Bool) {
     var lastCandidates: [AXUIElement] = []
     var disabledMatch: AXUIElement?
     var ambiguous: [AXUIElement] = []
@@ -142,8 +145,22 @@ func pressFirst(_ matcher: Matcher, in scope: String, timeout: Double, unique: B
         }
         throw notFound(matcher, in: scope, among: lastCandidates, timeout: timeout)
     }
-    try press(found)
-    return found
+    let element = summary(found)
+    let before = signature(lastCandidates)
+    let changedScreen = try withoutActuallyEscaping(candidates) { candidates in
+        try press(found) { signature(try candidates().filter(isPressable)) != before }
+    }
+    return (element, changedScreen)
+}
+
+func pressedPayload(_ pressed: (element: [String: Any], changedScreen: Bool)) -> [String: Any] {
+    var payload: [String: Any] = ["pressed": pressed.element]
+    if pressed.changedScreen { payload["confirmed"] = "screen changed" }
+    return payload
+}
+
+func pressedText(_ verb: String, _ pressed: (element: [String: Any], changedScreen: Bool)) -> String {
+    "\(verb) \(pressed.element["role"] ?? "") \"\(pressed.element["label"] ?? "")\"" + (pressed.changedScreen ? " (confirmed by the screen changing)" : "")
 }
 
 func matcher(_ options: Options, label: String) -> Matcher {
@@ -158,7 +175,7 @@ struct DeviceHubSession {
     init(_ options: Options) throws {
         try requireAccessibility()
         application = try applicationElement(appName: deviceHubExecutable, processIdentifier: nil)
-        simulator = try resolveSimulator(options.device)
+        simulator = try resolveSimulator(options.device, application: application)
         simulatorRequested = options.device != nil
     }
 
@@ -213,21 +230,23 @@ func runPress(_ options: Options) throws {
     var rule = matcher(options, label: label)
     rule.roles = options.roles ?? ["Button", "Radio"]
     let timeout = options.timeout ?? 2
-    let element = try pressFirst(rule, in: options.appName == deviceHubExecutable ? "Device Hub" : options.appName, timeout: timeout) {
+    let pressed = try pressFirst(rule, in: options.appName == deviceHubExecutable ? "Device Hub" : options.appName, timeout: timeout) {
         descendants(of: application).map(\.element)
     }
-    emit(["pressed": summary(element)], text: "pressed \(role(element)) \"\(label)\"")
+    emit(pressedPayload(pressed), text: pressedText("pressed", pressed))
 }
 
 func runTap(_ options: Options) throws {
     let label = try requireArgument(options, "a LABEL")
     let session = try DeviceHubSession(options)
     var window: DeviceWindow?
-    let element = try pressFirst(matcher(options, label: label), in: "screen", timeout: options.timeout ?? 2, unique: true) {
+    let pressed = try pressFirst(matcher(options, label: label), in: "screen", timeout: options.timeout ?? 2, unique: true) {
         window = try session.window()
         return window!.screenElements
     }
-    emit(["pressed": summary(element), "window": window?.dictionary ?? [:]], text: "tapped \(role(element)) \"\(displayLabel(element))\"")
+    var payload = pressedPayload(pressed)
+    payload["window"] = window?.dictionary ?? [:]
+    emit(payload, text: pressedText("tapped", pressed))
 }
 
 func runWait(_ options: Options) throws {
@@ -281,8 +300,10 @@ func runControl(_ options: Options) throws {
     let label = try requireArgument(options, "a LABEL")
     let session = try DeviceHubSession(options)
     let button = try poll(timeout: options.timeout ?? 2) { try? session.control(label) } ?? session.control(label)
-    try press(button)
-    emit(["pressed": summary(button)], text: "pressed \"\(displayLabel(button))\"")
+    let element = summary(button)
+    let before = signature(try session.window().screenElements)
+    let changedScreen = try press(button) { signature(try session.window().screenElements) != before }
+    emit(pressedPayload((element, changedScreen)), text: pressedText("pressed", (element, changedScreen)))
 }
 
 func activeDisplay(_ list: [Display]) -> Display? {
@@ -294,7 +315,9 @@ func runPose(_ options: Options) throws {
     let name = try requireArgument(options, "closed, partial or open").lowercased()
     guard let label = poses[name] else { throw Failure(.usage, "usage", "pose needs closed, partial or open") }
     let session = try DeviceHubSession(options)
-    try press(try session.control(label))
+    // When the pose is verified below, that check also stands in for an unanswered press.
+    let willVerify = options.verify && session.simulator != nil
+    try press(try session.control(label), changed: willVerify ? { true } : nil)
 
     guard options.verify else {
         emit(["pose": name, "verified": false], text: "pressed \(label)")
@@ -344,7 +367,7 @@ func runRotate(_ options: Options) throws {
     for _ in 0..<times {
         var changed: String?
         for _ in 0..<2 where changed == nil {
-            try press(button)
+            try press(button) { true }   // the orientation check below confirms it
             changed = try poll(timeout: timeout / 2) {
                 let orientation = try displayInfo(of: simulator).orientation
                 return orientation != current ? orientation : nil

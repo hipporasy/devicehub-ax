@@ -60,7 +60,7 @@ ax wait LABEL [--gone]          wait until it appears, or disappears
 ax list | press LABEL           the raw accessibility tree of any app (--app, --pid)
 ```
 
-Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--no-verify`. Run `ax --help` for the full list and the exit codes.
+Options: `--json`, `--device UDID|name` (or `AX_DEVICE`), `--timeout SECS`, `--contains`, `--role ROLES`, `--no-verify`. Run `ax --help` for the full list and the exit codes.
 
 `tap` and `wait` only look at the device's screen, so an app's Home tab never clashes with Device Hub's Home button. Device Hub must have the device's window on screen: a minimised window, a window on another Space, or a locked Mac hides it from the accessibility API.
 

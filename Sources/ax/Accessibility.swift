@@ -108,11 +108,30 @@ private let interactiveRoles: Set<String> = [
 
 func isInteractive(_ element: AXUIElement) -> Bool { interactiveRoles.contains(role(element)) }
 
-func press(_ element: AXUIElement) throws {
+/// Presses `element` and returns true when the press was confirmed only by `changed`.
+///
+/// Device Hub can answer "cannot complete" for a press that worked, when the app starts changing
+/// screens before the answer comes back. In that case `changed` decides, polled for two seconds;
+/// without it, or when nothing changes, the press counts as failed and is safe to retry.
+@discardableResult
+func press(_ element: AXUIElement, changed: (() throws -> Bool)? = nil) throws -> Bool {
+    // Read these first: once the screen changes, the element may no longer answer.
+    let elementRole = role(element), label = displayLabel(element)
     let result = AXUIElementPerformAction(element, kAXPressAction as CFString)
-    guard result == .success else {
-        throw Failure(.actionFailed, "press_failed", "Pressing \(role(element)) \"\(displayLabel(element))\" failed with AXError \(result.rawValue).")
+    if result == .success { return false }
+    if result == .cannotComplete, let changed, try poll(timeout: 2, { try changed() ? true : nil }) == true {
+        return true
     }
+    throw Failure(
+        .actionFailed, "press_failed",
+        "Pressing \(elementRole) \"\(label)\" failed with AXError \(result.rawValue).",
+        hint: result == .cannotComplete ? "Device Hub did not answer and nothing changed. Check with `ax screen` before retrying." : nil
+    )
+}
+
+/// What a list of elements says, to tell whether the screen changed.
+func signature(_ elements: [AXUIElement]) -> [String] {
+    elements.map { role($0) + "\u{1F}" + displayLabel($0) + "\u{1F}" + attribute($0, kAXValueAttribute) + "\u{1F}" + attribute($0, kAXSelectedAttribute) }
 }
 
 func requireAccessibility(prompt: Bool = true) throws {

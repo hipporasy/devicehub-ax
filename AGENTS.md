@@ -51,11 +51,13 @@ ax wait "Loading" --gone --timeout 20
 
 Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--display WHICH`, `--no-verify`.
 
-With one simulator booted, `ax` uses it. With several, pass `--device`: `ax` refuses rather than guess.
+`ax` picks the simulator in this order: `--device`, then the `AX_DEVICE` environment variable, then the only booted simulator, then the simulator in Device Hub's only device window. If none of these settles it, `ax` refuses rather than guess, and lists the booted simulators.
 
 ## Output and exit codes
 
 With `--json`, every command prints one JSON object on stdout. On success it has `"ok": true` and the result. On failure it has `"ok": false`, `error`, `message`, and usually `hint`. A failure also carries `candidates` (the closest labels on the screen) or `matches` (the elements a label matched).
+
+Sometimes Device Hub does not answer a press because the app is already changing screens. `ax` then checks whether the screen changed. If it did, the press counts as done and the output has `"confirmed": "screen changed"`. If nothing changed, `tap` exits 5 with `press_failed`, and retrying is safe.
 
 | Code | `error` | Meaning |
 |---|---|---|

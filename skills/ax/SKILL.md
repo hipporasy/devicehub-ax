@@ -40,7 +40,7 @@ ax rotate                          # one quarter turn right, confirmed
 ax control Home                    # Device Hub's own buttons: see `ax controls`
 ```
 
-With more than one simulator booted, pass `--device <UDID>` to every command.
+With several simulators booted and more than one Device Hub window open, run `export AX_DEVICE=<UDID>` once, or pass `--device <UDID>` to each command.
 
 ## Exit codes
 

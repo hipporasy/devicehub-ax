@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import Foundation
 import ImageIO
@@ -75,14 +76,15 @@ func runtimeName(_ identifier: String) -> String {
     return platform + " " + parts.dropFirst().joined(separator: ".")
 }
 
-/// The simulator named by --device (a UDID, a name or "booted"), or the only booted one.
+/// The simulator named by --device (a UDID, a name or "booted"), else the only booted one,
+/// else the one shown in Device Hub's only device window.
 /// Returns nil when nothing was requested and the choice is not obvious.
-func resolveSimulator(_ requested: String?) throws -> Simulator? {
+func resolveSimulator(_ requested: String?, application: AXUIElement? = nil) throws -> Simulator? {
     let booted = try bootedSimulators()
     guard let requested, requested != "booted" else {
         if booted.count == 1 { return booted[0] }
         if requested == "booted" { throw ambiguousSimulator(booted) }
-        return nil
+        return simulatorInOnlyWindow(among: booted, application: application)
     }
     let matches = booted.filter { $0.identifier.caseInsensitiveCompare(requested) == .orderedSame || $0.name == requested }
     if matches.count == 1 { return matches[0] }
@@ -90,6 +92,16 @@ func resolveSimulator(_ requested: String?) throws -> Simulator? {
         throw Failure(.usage, "unknown_device", "No booted simulator matches \"\(requested)\".", details: ["booted": booted.map(\.dictionary)])
     }
     throw ambiguousSimulator(matches)
+}
+
+/// With several simulators booted but one Device Hub device window open, that window's simulator is the one in use.
+func simulatorInOnlyWindow(among booted: [Simulator], application: AXUIElement?) -> Simulator? {
+    guard booted.count > 1, AXIsProcessTrusted() else { return nil }
+    guard let application = application
+            ?? processIdentifier(executableName: deviceHubExecutable).map(AXUIElementCreateApplication) else { return nil }
+    let windows = deviceWindows(in: application)
+    guard windows.count == 1, let identifier = windows[0].deviceIdentifier else { return nil }
+    return booted.first { $0.identifier == identifier }
 }
 
 func requireSimulator(_ requested: String?) throws -> Simulator {
