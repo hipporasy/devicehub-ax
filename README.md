@@ -1,6 +1,6 @@
 # devicehub-ax
 
-Fold, rotate and tap the **iPhone Duo simulator** from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts and AI coding agents such as Claude Code and Codex, and it takes App Store screenshots of the inner display.
+Fold, rotate, tap, scroll and type on the **iPhone Duo simulator** from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts and AI coding agents such as Claude Code and Codex, and it takes App Store screenshots of the inner display.
 
 Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls have no `simctl` or `devicectl` equivalent, such as the iPhone Duo poses (Closed, Partially Open, Open). Tools that inject touches, such as AXe and idb, land on the Duo's outer screen even when it is open. `ax` presses Device Hub's buttons and the app's own elements, on either screen, and confirms each action.
 
@@ -67,6 +67,8 @@ ax controls | control LABEL     list or press Device Hub's buttons under the dev
 ax screen                       list the elements on the device's screen
 ax tap LABEL                    press one of them
 ax wait LABEL [--gone]          wait until it appears, or disappears
+ax scroll [down|up] [--to LABEL]  scroll a list a page at a time, or until LABEL is on the screen
+ax type TEXT [--into LABEL]     set the text of a text field, confirmed by reading it back
 ax list | press LABEL           the raw accessibility tree of any app (--app, --pid)
 ```
 
@@ -90,7 +92,8 @@ App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (
 - Tested with Xcode 27.1 (Device Hub) on macOS 27.
 - Device Hub reports a process ID of -1 to `NSWorkspace`, so `ax` finds it in the process table by executable name.
 - Swipes from tools such as AXe or `idb` land on the Duo's outer display; use accessibility presses for the inner display.
-- `ax tap` performs the accessibility press, so it cannot swipe, scroll or type.
+- `ax tap` performs the accessibility press and `ax scroll` scrolls by whole pages; neither can swipe, drag or long-press.
+- `ax type` sets the field's value rather than pressing keys, so it cannot press Return. Some fields, such as Safari's address bar, only take text after `ax tap` puts them in edit mode.
 - devicectl reports no hinge angle, so `ax state` shows Partially Open and Open both as `unfolded`.
 
 ## Releasing

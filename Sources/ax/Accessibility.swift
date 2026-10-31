@@ -34,7 +34,22 @@ func isPressable(_ element: AXUIElement) -> Bool { actionNames(element).contains
 
 /// The attributes a LABEL is matched against.
 func labels(_ element: AXUIElement) -> [String] {
-    [kAXTitleAttribute, kAXDescriptionAttribute, "AXIdentifier", kAXHelpAttribute].map { attribute(element, $0) }
+    [kAXTitleAttribute, kAXDescriptionAttribute, "AXIdentifier", kAXHelpAttribute, "AXPlaceholderValue"].map { attribute(element, $0) }
+}
+
+let textRoles: Set<String> = ["AXTextField", "AXTextArea", "AXSearchField", "AXComboBox"]
+
+/// A text field, text view or search field whose value can be set.
+func isEditableText(_ element: AXUIElement) -> Bool {
+    guard textRoles.contains(role(element)) else { return false }
+    var settable = DarwinBoolean(false)
+    return AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+}
+
+/// The text in a field. An empty field reports its placeholder as its value, so that reads as empty.
+func text(of element: AXUIElement) -> String {
+    let value = attribute(element, kAXValueAttribute)
+    return value == attribute(element, "AXPlaceholderValue") ? "" : value
 }
 
 /// The name a person would read: description first, as SwiftUI and Device Hub put labels there.
@@ -54,10 +69,15 @@ func summary(_ element: AXUIElement) -> [String: Any] {
     ]
 }
 
-func descendants(of root: AXUIElement, depth: Int = 0, maxDepth: Int = 25) -> [(element: AXUIElement, depth: Int)] {
+/// Walks the tree below `root`. A child equal to one of its ancestors is skipped:
+/// with no windows open (a locked Mac, say), Device Hub's application lists itself as its own child.
+func descendants(of root: AXUIElement, depth: Int = 0, maxDepth: Int = 25, ancestors: [AXUIElement] = []) -> [(element: AXUIElement, depth: Int)] {
     var result = [(element: root, depth: depth)]
     guard depth < maxDepth else { return result }
-    for child in children(root) { result += descendants(of: child, depth: depth + 1, maxDepth: maxDepth) }
+    let path = ancestors + [root]
+    for child in children(root) where !path.contains(where: { CFEqual($0, child) }) {
+        result += descendants(of: child, depth: depth + 1, maxDepth: maxDepth, ancestors: path)
+    }
     return result
 }
 

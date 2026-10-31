@@ -32,6 +32,8 @@ ax wait "PAST 7 DAYS"                # the next screen has loaded
 ax screenshot progress.png           # captures the active display, no alpha channel
 ax tap "Start Reading" && ax wait "End session"
 ax wait "Loading" --gone --timeout 20
+ax scroll --to "Privacy & Security"  # page down the list until the row is on the screen
+ax tap Search && ax type "wifi"      # set a text field's text, confirmed by reading it back
 ```
 
 ## Commands
@@ -43,13 +45,15 @@ ax wait "Loading" --gone --timeout 20
 | `ax screen` | Elements on the device's screen: `role \| label \| identifier \| value \| flags`. Duplicates and unnamed containers are dropped. |
 | `ax tap LABEL` | Presses an element on the screen. It matches title, description, identifier and help exactly; `--contains` matches a case-insensitive substring. Buttons and tabs win over text with the same label. Different elements that match is an error, not a guess. |
 | `ax wait LABEL` | Waits until the element is on the screen (default 10 s); with `--gone`, until it is not. |
+| `ax scroll [down\|up\|left\|right]` | Scrolls a list on the screen by a page (`--pages N`). With `--to LABEL`, keeps scrolling until LABEL is on the screen (at most 10 pages by default). Stops at the end of the list. A screen with several lists, such as a sidebar and its detail, scrolls the first one that moves; `--in LABEL` picks the list by its label or the label of something in it. |
+| `ax type TEXT` | Sets the text of the text field on the screen, then reads it back. `--into LABEL` picks the field by label, identifier or placeholder; without it, the field must be the only one or the focused one. `--append` adds to the text instead of replacing it. |
 | `ax pose closed\|partial\|open` | Presses the pose button and waits until the matching display is on. |
 | `ax rotate [N]` | Presses Rotate Right N times, confirming each quarter turn. |
 | `ax screenshot PATH` | Captures the active display (`--display inner\|outer\|ID` to pick one). A `.jpg` path writes JPEG; any other path writes PNG. Neither has an alpha channel. |
 | `ax controls` / `ax control LABEL` | Lists or presses Device Hub's own buttons under the device: Home, Screenshot, Record, Rotate Right, Closed, Partially Open, Open. |
 | `ax list` / `ax press LABEL` | The raw accessibility tree, and a press anywhere in it. Use these for apps other than Device Hub (`--app`, `--pid`). |
 
-Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--display WHICH`, `--no-verify`.
+Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--display WHICH`, `--no-verify`, `--to LABEL`, `--in LABEL`, `--pages N`, `--into LABEL`, `--append`.
 
 `ax` picks the simulator in this order: `--device`, then the `AX_DEVICE` environment variable, then the only booted simulator, then the simulator in Device Hub's only device window. If none of these settles it, `ax` refuses rather than guess, and lists the booted simulators.
 
@@ -62,21 +66,22 @@ Sometimes Device Hub does not answer a press because the app is already changing
 | Code | `error` | Meaning |
 |---|---|---|
 | 0 | | Done and confirmed |
-| 1 | `not_found` | No element matched; try one of `candidates` |
+| 1 | `not_found`, `not_scrollable` | No element matched; try one of `candidates` |
 | 2 | `usage`, `ambiguous`, `ambiguous_device`, `unknown_device` | Fix the command |
 | 3 | `accessibility_denied` | Ask the user for Accessibility access |
 | 4 | `app_not_running`, `no_device_window`, `no_booted_simulator`, `app_not_responding` | Device Hub, its window or the simulator is missing |
-| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed` | The action did not take effect |
+| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed`, `scroll_failed`, `type_failed`, `type_not_confirmed` | The action did not take effect |
 | 6 | `simulator_tool_failed` | `simctl` or `devicectl` failed |
 
 ## Gotchas
 
 1. **Device Hub's window must be on screen.** A window that is minimised, on another Space, or behind a locked Mac drops out of the accessibility tree. `ax` reports `no_device_window`. Run `open -a DeviceHub` and select the simulator.
-2. **`tap` presses; it does not touch.** It performs the element's accessibility action, so it cannot swipe, scroll, long-press or type. An element of a lazy list that is off screen is not in the tree until it scrolls into view.
-3. **Swipes from other tools land on the outer screen.** AXe, idb and `xcui swipe` touch the Duo's outer display even when it is open.
-4. **`partial` and `open` look the same in `ax state`.** Both turn the inner display on, and devicectl reports no hinge angle. The sidebar thumbnail in Device Hub is not reliable either.
-5. **Labels can change between Xcode versions.** `ax controls` shows the current Device Hub buttons.
-6. **App Store Connect.** `APP_IPHONE_DUO` takes the inner display: 2853 x 2007 or 2007 x 2853. `ax screenshot` writes no alpha channel, which App Store Connect requires.
+2. **`tap` presses; it does not touch.** It performs the element's accessibility action, so it cannot swipe, drag or long-press. An element of a lazy list that is off screen is not in the tree until it scrolls into view: use `ax scroll --to LABEL`.
+3. **`type` sets the value; it does not press keys.** It cannot press Return or a keyboard key. Some fields, such as Safari's address bar, only take text after `ax tap` puts them in edit mode; if not, `type` fails with `type_not_confirmed`. Tap the field and retry.
+4. **Swipes from other tools land on the outer screen.** AXe, idb and `xcui swipe` touch the Duo's outer display even when it is open.
+5. **`partial` and `open` look the same in `ax state`.** Both turn the inner display on, and devicectl reports no hinge angle. The sidebar thumbnail in Device Hub is not reliable either.
+6. **Labels can change between Xcode versions.** `ax controls` shows the current Device Hub buttons.
+7. **App Store Connect.** `APP_IPHONE_DUO` takes the inner display: 2853 x 2007 or 2007 x 2853. `ax screenshot` writes no alpha channel, which App Store Connect requires.
 
 ## Duo screenshot pass
 

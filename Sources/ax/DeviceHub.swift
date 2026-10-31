@@ -21,7 +21,7 @@ struct DeviceWindow {
         var seen = Set<String>()
         return screenRoots.flatMap { descendants(of: $0).dropFirst().map(\.element) }.filter { element in
             let fields = [displayLabel(element), attribute(element, "AXIdentifier"), attribute(element, kAXValueAttribute)]
-            guard fields.contains(where: { !$0.isEmpty }) else { return false }
+            guard fields.contains(where: { !$0.isEmpty }) || textRoles.contains(role(element)) else { return false }
             return seen.insert(([role(element)] + fields).joined(separator: "\u{1F}")).inserted
         }
     }

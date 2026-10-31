@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-let version = "0.2.2"
+let version = "0.3.0"
 
 let usage = """
 Usage: ax <command> [options]
@@ -22,6 +22,9 @@ App on the simulator:
   screen                    List the elements on the device's screen
   tap LABEL                 Press an element on the screen by its label or identifier
   wait LABEL                Wait until an element is on the screen (--gone: until it is not)
+  type TEXT                 Replace the text in the screen's text field (--into LABEL picks the field, --append adds to it)
+  scroll [down|up|left|right]
+                            Scroll the screen's list by a page (--to LABEL: until LABEL is on the screen)
 
 Any app:
   list                      Print the whole accessibility tree
@@ -35,6 +38,11 @@ Options:
   --contains        Match labels by case-insensitive substring instead of exactly
   --role ROLES      Only match these roles, separated by |, e.g. AXRadio or Button|Radio
   --display WHICH   screenshot: active (default), inner, outer or a display id
+  --to LABEL        scroll: keep scrolling until this element is on the screen
+  --into LABEL      type: the text field, by label, identifier or placeholder
+  --append          type: add to the field's text instead of replacing it
+  --in LABEL        scroll: the list to scroll, by its label or the label of something in it
+  --pages N         scroll: pages to scroll (default 1; with --to, the most to try, default 10)
   --no-verify       pose and rotate: do not wait for the device to confirm
   --app NAME        list and press: app name or bundle identifier (default: DeviceHub)
   --pid PID         list and press: process identifier, instead of --app
@@ -57,6 +65,11 @@ struct Options {
     var contains = false
     var gone = false
     var verify = true
+    var scrollTarget: String?
+    var scrollContainer: String?
+    var pages: Int?
+    var typeTarget: String?
+    var append = false
 }
 
 func parseOptions() throws -> Options {
@@ -78,6 +91,13 @@ func parseOptions() throws -> Options {
         case "--app": options.appName = try value(for: argument)
         case "--device": options.device = try value(for: argument)
         case "--display": options.display = try value(for: argument)
+        case "--into": options.typeTarget = try value(for: argument)
+        case "--append": options.append = true
+        case "--in": options.scrollContainer = try value(for: argument)
+        case "--to": options.scrollTarget = try value(for: argument)
+        case "--pages":
+            guard let pages = Int(try value(for: argument)), pages > 0 else { throw Failure(.usage, "usage", "--pages needs a positive whole number") }
+            options.pages = pages
         case "--role": options.roles = try value(for: argument).split(separator: "|").map(String.init)
         case "--pid":
             guard let processIdentifier = pid_t(try value(for: argument)) else { throw Failure(.usage, "usage", "--pid needs a number") }
@@ -211,6 +231,7 @@ func runList(_ options: Options) throws {
             entry["title"] = attribute(node.element, kAXTitleAttribute)
             entry["description"] = attribute(node.element, kAXDescriptionAttribute)
             entry["help"] = attribute(node.element, kAXHelpAttribute)
+            entry["actions"] = actionNames(node.element)
             return entry
         }], text: "")
         return
@@ -268,6 +289,122 @@ func runWait(_ options: Options) throws {
         throw notFound(rule, in: "screen", among: lastElements, timeout: timeout)
     }
     emit(result, text: options.gone ? "\"\(label)\" is gone" : "found \"\(label)\"")
+}
+
+/// Sets the value of a text field on the screen, then reads it back to confirm. With no --into, the field must be
+/// the only one on the screen, or the focused one.
+func runType(_ options: Options) throws {
+    guard let typed = options.arguments.first else {
+        throw Failure(.usage, "usage", "type needs TEXT", hint: "Run `ax --help`.")
+    }
+    let session = try DeviceHubSession(options)
+    let rule = options.typeTarget.map { matcher(options, label: $0) }
+    let timeout = options.timeout ?? 2
+    var fields: [AXUIElement] = []
+    var lastElements: [AXUIElement] = []
+    let field: AXUIElement? = try poll(timeout: timeout) {
+        lastElements = try session.window().screenElements
+        fields = lastElements.filter(isEditableText).filter { rule?.matches($0) ?? true }
+        if fields.count == 1 { return fields[0] }
+        let focused = fields.filter { attribute($0, kAXFocusedAttribute) == "1" }
+        return focused.count == 1 ? focused[0] : nil
+    }
+    guard let field else {
+        if fields.count > 1 {
+            throw Failure(
+                .usage, "ambiguous",
+                "\(fields.count) text fields are on the screen and none is focused.",
+                hint: "Pick one with --into LABEL, or tap it first.",
+                details: ["matches": fields.map(summary)]
+            )
+        }
+        if let rule { throw notFound(rule, in: "screen", among: lastElements, timeout: timeout) }
+        throw Failure(.notFound, "not_found", "No editable text field is on the screen within \(timeout) s.", hint: "Tap the control that opens the field, e.g. a Search button, then run `ax screen`.")
+    }
+    let expected = options.append ? text(of: field) + typed : typed
+    let result = AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, expected as CFString)
+    guard result == .success else {
+        throw Failure(.actionFailed, "type_failed", "Setting the text failed with AXError \(result.rawValue).", hint: "Retrying is safe.")
+    }
+    guard try poll(timeout: 2, { text(of: field) == expected ? true : nil }) == true else {
+        throw Failure(.actionFailed, "type_not_confirmed", "The field reads \"\(text(of: field))\", not \"\(expected)\".", details: ["field": summary(field)])
+    }
+    var element = summary(field)
+    element["value"] = expected
+    emit(["typed": typed, "field": element], text: "typed \"\(typed)\" into \(role(field)) \"\(displayLabel(field).isEmpty ? attribute(field, "AXPlaceholderValue") : displayLabel(field))\"")
+}
+
+/// The lists on the screen that take `action`: elements offering it whose parent does not, since a list's rows
+/// offer it too. With `named`, the list holding the element it matches, or that element itself.
+func scrollableLists(in window: DeviceWindow, action: String, named: Matcher?) throws -> [AXUIElement] {
+    let nodes = window.screenRoots.flatMap { descendants(of: $0).map(\.element) }
+    if let named {
+        guard let match = nodes.first(where: named.matches) else {
+            throw notFound(named, in: "screen", among: window.screenElements, timeout: 0)
+        }
+        var list: AXUIElement? = match
+        while let element = list, !actionNames(element).contains(action) { list = parent(element) }
+        guard let list else { throw Failure(.notFound, "not_scrollable", "\"\(named.label)\" does not scroll and is in no list that does.") }
+        return [list]
+    }
+    return nodes.filter { element in
+        actionNames(element).contains(action) && !(parent(element).map { actionNames($0).contains(action) } ?? false)
+    }
+}
+
+let scrollActions = ["down": "AXScrollDownByPage", "up": "AXScrollUpByPage", "left": "AXScrollLeftByPage", "right": "AXScrollRightByPage"]
+
+/// Scrolls a list on the screen a page at a time, until `--pages` pages have moved, the `--to` element is on the
+/// screen, or no list moves any more (the end). A screen can hold several lists, such as a sidebar and its detail,
+/// so each is tried until one moves, and that one is kept; `--in LABEL` names the list instead.
+func runScroll(_ options: Options) throws {
+    let direction = options.arguments.first ?? "down"
+    guard let action = scrollActions[direction] else {
+        throw Failure(.usage, "usage", "scroll takes down, up, left or right, not \(direction)")
+    }
+    let session = try DeviceHubSession(options)
+    let rule = options.scrollTarget.map { matcher(options, label: $0) }
+    let maxPages = options.pages ?? (rule == nil ? 1 : 10)
+    var pages = 0
+    var list: AXUIElement?
+    pageLoop: while true {
+        let window = try session.window()
+        let elements = window.screenElements
+        if let rule, let found = elements.first(where: rule.matches) {
+            if actionNames(found).contains("AXScrollToVisible") {
+                AXUIElementPerformAction(found, "AXScrollToVisible" as CFString)
+            }
+            emit(["direction": direction, "pages": pages, "found": summary(found)], text: "found \"\(displayLabel(found))\" after \(pages) page\(pages == 1 ? "" : "s")")
+            return
+        }
+        if pages == maxPages { break }
+        let candidates = try list.map { [$0] } ?? scrollableLists(in: window, action: action, named: options.scrollContainer.map { matcher(options, label: $0) })
+        guard !candidates.isEmpty else {
+            throw Failure(.notFound, "not_scrollable", "Nothing on the screen scrolls \(direction).", hint: "Run `ax screen` to see what is there.")
+        }
+        for candidate in candidates {
+            let before = signature(try session.window().screenElements)
+            let result = AXUIElementPerformAction(candidate, action as CFString)
+            guard result == .success || result == .cannotComplete else {
+                throw Failure(.actionFailed, "scroll_failed", "Scrolling \(direction) failed with AXError \(result.rawValue).", hint: "Retrying is safe.")
+            }
+            if try poll(timeout: 1.5, { try signature(session.window().screenElements) != before ? true : nil }) == true {
+                list = candidate
+                pages += 1
+                continue pageLoop
+            }
+        }
+        break
+    }
+    if let rule {
+        throw Failure(
+            .notFound, "not_found",
+            "\"\(rule.label)\" did not appear after scrolling \(direction) \(pages) page\(pages == 1 ? "" : "s")" + (pages < maxPages ? ", where the list ends." : "."),
+            hint: pages < maxPages ? "Try scrolling the other way." : "Pass a larger --pages.",
+            details: ["pages": pages, "candidates": suggestions(for: rule.label, among: try session.window().screenElements)]
+        )
+    }
+    emit(["direction": direction, "pages": pages, "end": pages < maxPages], text: pages < maxPages ? "scrolled \(direction) \(pages) page\(pages == 1 ? "" : "s"), then reached the end" : "scrolled \(direction) \(pages) page\(pages == 1 ? "" : "s")")
 }
 
 func runScreen(_ options: Options) throws {
@@ -485,6 +622,8 @@ func run(_ options: Options) throws {
     case "tap": try runTap(options)
     case "wait": try runWait(options)
     case "screen": try runScreen(options)
+    case "scroll": try runScroll(options)
+    case "type": try runType(options)
     case "controls": try runControls(options)
     case "control": try runControl(options)
     case "pose": try runPose(options)
