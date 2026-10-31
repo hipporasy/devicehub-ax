@@ -4,7 +4,7 @@ Fold, rotate, tap, scroll and type on the **iPhone Duo simulator** from the comm
 
 Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls have no `simctl` or `devicectl` equivalent, such as the iPhone Duo poses (Closed, Partially Open, Open). Tools that inject touches, such as AXe and idb, land on the Duo's outer screen even when it is open. `ax` presses Device Hub's buttons and the app's own elements, on either screen, and confirms each action.
 
-<p align="center"><img src="docs/demo.gif" width="640" alt="ax folding the iPhone Duo simulator closed and open, then tapping the Activities, Progress and Home tabs on the inner screen and taking a screenshot"></p>
+<p align="center"><img src="docs/demo.gif" width="640" alt="ax folding the iPhone Duo simulator closed and open, tapping tabs on the inner screen, taking a screenshot, scrolling a Settings list and typing into Safari's address bar"></p>
 
 ```bash
 ax doctor                    # check access, Device Hub and the booted simulator
