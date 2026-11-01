@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-let version = "0.3.0"
+let version = "0.4.0"
 
 let usage = """
 Usage: ax <command> [options]
@@ -22,6 +22,7 @@ App on the simulator:
   screen                    List the elements on the device's screen
   tap LABEL                 Press an element on the screen by its label or identifier
   wait LABEL                Wait until an element is on the screen (--gone: until it is not)
+  action LABEL NAME         Run one of an element's custom actions, such as a row's swipe action (Delete)
   type TEXT                 Replace the text in the screen's text field (--into LABEL picks the field, --append adds to it)
   scroll [down|up|left|right]
                             Scroll the screen's list by a page (--to LABEL: until LABEL is on the screen)
@@ -291,6 +292,58 @@ func runWait(_ options: Options) throws {
     emit(result, text: options.gone ? "\"\(label)\" is gone" : "found \"\(label)\"")
 }
 
+/// Runs a custom action of an element on the screen: what iOS offers in place of a swipe or a long press,
+/// such as a row's Delete or Pin, or an app icon's Edit mode. `ax screen` lists them under `actions`.
+func runAction(_ options: Options) throws {
+    guard options.arguments.count == 2 else {
+        throw Failure(.usage, "usage", "action needs a LABEL and an action NAME", hint: "Run `ax screen` to see each element's actions.")
+    }
+    let label = options.arguments[0], name = options.arguments[1]
+    let session = try DeviceHubSession(options)
+    let rule = matcher(options, label: label)
+    var lastElements: [AXUIElement] = []
+    var matches: [AXUIElement] = []
+    let found: (element: AXUIElement, action: String)? = try poll(timeout: options.timeout ?? 2) {
+        lastElements = try session.window().screenElements
+        matches = lastElements.filter { rule.matches($0) && !customActions($0).isEmpty }
+        var seen = Set<String>()
+        let distinct = matches.filter { seen.insert(role($0) + "\u{1F}" + displayLabel($0)).inserted }
+        guard distinct.count == 1 else { return nil }
+        let element = distinct[0]
+        return customActions(element).first { $0.name.caseInsensitiveCompare(name) == .orderedSame }.map { (element, $0.action) }
+    }
+    guard let found else {
+        var seen = Set<String>()
+        let distinct = matches.filter { seen.insert(role($0) + "\u{1F}" + displayLabel($0)).inserted }
+        if distinct.count > 1 {
+            throw Failure(
+                .usage, "ambiguous",
+                "\(distinct.count) different elements with actions match \"\(label)\": " + distinct.map { "\(role($0)) \"\(displayLabel($0))\"" }.joined(separator: ", ") + ".",
+                hint: "Use the exact label, or narrow it with --role.",
+                details: ["matches": distinct.map(summary)]
+            )
+        }
+        if let element = distinct.first {
+            let names = customActions(element).map(\.name)
+            throw Failure(
+                .notFound, "not_found",
+                "\(role(element)) \"\(displayLabel(element))\" has no \"\(name)\" action.",
+                hint: "Its actions: " + names.map { "\"\($0)\"" }.joined(separator: ", "),
+                details: ["candidates": names]
+            )
+        }
+        throw notFound(rule, in: "screen", among: lastElements.filter { !customActions($0).isEmpty }, timeout: options.timeout ?? 2)
+    }
+    let element = summary(found.element)
+    let before = signature(lastElements)
+    let result = AXUIElementPerformAction(found.element, found.action as CFString)
+    let changed = try poll(timeout: 2) { try signature(session.window().screenElements) != before ? true : nil } ?? false
+    guard result == .success || (result == .cannotComplete && changed) else {
+        throw Failure(.actionFailed, "action_failed", "The \"\(name)\" action of \(element["role"] ?? "") \"\(element["label"] ?? "")\" failed with AXError \(result.rawValue).", hint: "Retrying is safe.")
+    }
+    emit(["element": element, "action": name, "screenChanged": changed], text: "ran \"\(name)\" on \(element["role"] ?? "") \"\(element["label"] ?? "")\"" + (changed ? "" : " (the screen did not change)"))
+}
+
 /// Sets the value of a text field on the screen, then reads it back to confirm. With no --into, the field must be
 /// the only one on the screen, or the focused one.
 func runType(_ options: Options) throws {
@@ -423,6 +476,8 @@ func runScreen(_ options: Options) throws {
         var flags: [String] = []
         if isSelected(element) { flags.append("selected") }
         if !isEnabled(element) { flags.append("disabled") }
+        let actions = customActions(element).map(\.name)
+        if !actions.isEmpty { flags.append("actions: " + actions.joined(separator: "; ")) }
         return [role(element), displayLabel(element), attribute(element, "AXIdentifier"), attribute(element, kAXValueAttribute), flags.joined(separator: ",")].joined(separator: " | ")
     }.joined(separator: "\n"))
 }
@@ -624,6 +679,7 @@ func run(_ options: Options) throws {
     case "screen": try runScreen(options)
     case "scroll": try runScroll(options)
     case "type": try runType(options)
+    case "action": try runAction(options)
     case "controls": try runControls(options)
     case "control": try runControl(options)
     case "pose": try runPose(options)

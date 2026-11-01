@@ -57,6 +57,15 @@ func displayLabel(_ element: AXUIElement) -> String {
     [kAXDescriptionAttribute, kAXTitleAttribute, kAXHelpAttribute].map { attribute(element, $0) }.first { !$0.isEmpty } ?? ""
 }
 
+/// The custom actions an element offers, such as a row's swipe actions (Delete, Pin) or an app icon's Edit mode.
+/// The accessibility API lists each as "Name:Delete\nTarget:0x0\nSelector:(null)" among the action names.
+func customActions(_ element: AXUIElement) -> [(name: String, action: String)] {
+    actionNames(element).compactMap { action in
+        guard action.hasPrefix("Name:") else { return nil }
+        return (String(action.dropFirst(5).prefix { $0 != "\n" }), action)
+    }
+}
+
 func summary(_ element: AXUIElement) -> [String: Any] {
     [
         "role": role(element),
@@ -66,6 +75,7 @@ func summary(_ element: AXUIElement) -> [String: Any] {
         "selected": isSelected(element),
         "enabled": isEnabled(element),
         "pressable": isPressable(element),
+        "actions": customActions(element).map(\.name),
     ]
 }
 

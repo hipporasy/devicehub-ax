@@ -34,6 +34,7 @@ ax tap "Start Reading" && ax wait "End session"
 ax wait "Loading" --gone --timeout 20
 ax scroll --to "Privacy & Security"  # page down the list until the row is on the screen
 ax tap Search && ax type "wifi"      # set a text field's text, confirmed by reading it back
+ax action "Groceries" Delete         # a row's swipe action, without swiping
 ```
 
 ## Commands
@@ -42,10 +43,11 @@ ax tap Search && ax type "wifi"      # set a text field's text, confirmed by rea
 |---|---|
 | `ax doctor` | Checks the setup, with a fix for each failure. |
 | `ax state` | Device, pose (`closed`, `unfolded` or `n/a`), orientation and displays. |
-| `ax screen` | Elements on the device's screen: `role \| label \| identifier \| value \| flags`. Duplicates and unnamed containers are dropped. |
+| `ax screen` | Elements on the device's screen: `role \| label \| identifier \| value \| flags`. Flags include `selected`, `disabled` and the element's custom actions. Duplicates and unnamed containers are dropped. |
 | `ax tap LABEL` | Presses an element on the screen. It matches title, description, identifier and help exactly; `--contains` matches a case-insensitive substring. Buttons and tabs win over text with the same label. Different elements that match is an error, not a guess. |
 | `ax wait LABEL` | Waits until the element is on the screen (default 10 s); with `--gone`, until it is not. |
 | `ax scroll [down\|up\|left\|right]` | Scrolls a list on the screen by a page (`--pages N`). With `--to LABEL`, keeps scrolling until LABEL is on the screen (at most 10 pages by default). Stops at the end of the list. A screen with several lists, such as a sidebar and its detail, scrolls the first one that moves; `--in LABEL` picks the list by its label or the label of something in it. |
+| `ax action LABEL NAME` | Runs one of the element's custom actions: what iOS offers in place of swipe actions and some long presses, such as a row's Delete or Pin, or an app icon's Edit mode. `ax screen` lists them in the last column (`actions: Delete; Pin`) and under `actions` in JSON. The name matches case-insensitively. |
 | `ax type TEXT` | Sets the text of the text field on the screen, then reads it back. `--into LABEL` picks the field by label, identifier or placeholder; without it, the field must be the only one or the focused one. `--append` adds to the text instead of replacing it. |
 | `ax pose closed\|partial\|open` | Presses the pose button and waits until the matching display is on. |
 | `ax rotate [N]` | Presses Rotate Right N times, confirming each quarter turn. |
@@ -70,13 +72,13 @@ Sometimes Device Hub does not answer a press because the app is already changing
 | 2 | `usage`, `ambiguous`, `ambiguous_device`, `unknown_device` | Fix the command |
 | 3 | `accessibility_denied` | Ask the user for Accessibility access |
 | 4 | `app_not_running`, `no_device_window`, `no_booted_simulator`, `app_not_responding` | Device Hub, its window or the simulator is missing |
-| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed`, `scroll_failed`, `type_failed`, `type_not_confirmed` | The action did not take effect |
+| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed`, `scroll_failed`, `type_failed`, `type_not_confirmed`, `action_failed` | The action did not take effect |
 | 6 | `simulator_tool_failed` | `simctl` or `devicectl` failed |
 
 ## Gotchas
 
 1. **Device Hub's window must be on screen.** A window that is minimised, on another Space, or behind a locked Mac drops out of the accessibility tree. `ax` reports `no_device_window`. Run `open -a DeviceHub` and select the simulator.
-2. **`tap` presses; it does not touch.** It performs the element's accessibility action, so it cannot swipe, drag or long-press. An element of a lazy list that is off screen is not in the tree until it scrolls into view: use `ax scroll --to LABEL`.
+2. **`tap` presses; it does not touch.** It performs the element's accessibility action, so it cannot drag or long-press. A row's swipe actions are custom actions: run them with `ax action LABEL NAME`. `AXShowMenu` does nothing on iOS elements, so there is no long press. An element of a lazy list that is off screen is not in the tree until it scrolls into view: use `ax scroll --to LABEL`.
 3. **`type` sets the value; it does not press keys.** It cannot press Return or a keyboard key. Some fields, such as Safari's address bar, only take text after `ax tap` puts them in edit mode; if not, `type` fails with `type_not_confirmed`. Tap the field and retry.
 4. **Swipes from other tools land on the outer screen.** AXe, idb and `xcui swipe` touch the Duo's outer display even when it is open.
 5. **`partial` and `open` look the same in `ax state`.** Both turn the inner display on, and devicectl reports no hinge angle. The sidebar thumbnail in Device Hub is not reliable either.

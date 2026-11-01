@@ -28,6 +28,7 @@ ax wait "Welcome"                  # wait for the next screen (default 10 s)
 ax wait "Loading" --gone --timeout 30
 ax scroll --to "Settings"          # page down until the row is on the screen (--in LABEL picks the list)
 ax type "hello" --into Search      # set a text field's text, read back to confirm
+ax action "Groceries" Delete       # a row's swipe action; `ax screen` lists actions per element
 ax screenshot shot.jpg             # the active display, no alpha channel
 ```
 
@@ -50,7 +51,7 @@ With several simulators booted and more than one Device Hub window open, run `ex
 
 ## Limits
 
-- `tap` performs the accessibility press and `scroll` moves whole pages: no swipes, drags or long presses. Off-screen rows of a lazy list are not in the tree until `ax scroll --to` brings them in.
+- `tap` performs the accessibility press and `scroll` moves whole pages: no drags or long presses. Swipe actions on rows run with `ax action`. Off-screen rows of a lazy list are not in the tree until `ax scroll --to` brings them in.
 - `type` sets the value and cannot press Return. If it fails with `type_not_confirmed`, `ax tap` the field first to put it in edit mode.
 - The Device Hub window must stay on screen (not minimised, not on another Space, Mac unlocked).
 - `partial` and `open` both read as `unfolded` in `ax state`.

@@ -69,6 +69,7 @@ ax tap LABEL                    press one of them
 ax wait LABEL [--gone]          wait until it appears, or disappears
 ax scroll [down|up] [--to LABEL]  scroll a list a page at a time, or until LABEL is on the screen
 ax type TEXT [--into LABEL]     set the text of a text field, confirmed by reading it back
+ax action LABEL NAME            run an element's custom action, such as a row's swipe action (Delete)
 ax list | press LABEL           the raw accessibility tree of any app (--app, --pid)
 ```
 
@@ -92,7 +93,7 @@ App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (
 - Tested with Xcode 27.1 (Device Hub) on macOS 27.
 - Device Hub reports a process ID of -1 to `NSWorkspace`, so `ax` finds it in the process table by executable name.
 - Swipes from tools such as AXe or `idb` land on the Duo's outer display; use accessibility presses for the inner display.
-- `ax tap` performs the accessibility press and `ax scroll` scrolls by whole pages; neither can swipe, drag or long-press.
+- `ax tap` performs the accessibility press and `ax scroll` scrolls by whole pages; neither can drag or long-press. Swipe actions on rows, such as Delete, are custom actions: `ax screen` lists them and `ax action` runs them.
 - `ax type` sets the field's value rather than pressing keys, so it cannot press Return. Some fields, such as Safari's address bar, only take text after `ax tap` puts them in edit mode.
 - devicectl reports no hinge angle, so `ax state` shows Partially Open and Open both as `unfolded`.
 
