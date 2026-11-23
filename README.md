@@ -1,6 +1,6 @@
 # devicehub-ax
 
-Fold, rotate, tap, scroll and type on the **iPhone Duo simulator** from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts and AI coding agents such as Claude Code and Codex, and it takes App Store screenshots of the inner display.
+Fold, rotate, tap, scroll and type on iOS simulators, including the **iPhone Duo**, from the command line. `ax` drives Xcode 27's **Device Hub** and the app on the simulator through the macOS accessibility API. It is built for scripts and AI coding agents such as Claude Code and Codex. It takes App Store screenshots, and it checks a screen for elements VoiceOver lands on with nothing to read.
 
 Xcode 27 replaced Simulator.app with Device Hub. Some simulator controls have no `simctl` or `devicectl` equivalent, such as the iPhone Duo poses (Closed, Partially Open, Open). Tools that inject touches, such as AXe and idb, land on the Duo's outer screen even when it is open. `ax` presses Device Hub's buttons and the app's own elements, on either screen, and confirms each action.
 
@@ -12,10 +12,12 @@ ax pose open                 # unfold the iPhone Duo; returns once the inner dis
 ax tap Progress              # press an element of the app by its label
 ax wait "PAST 7 DAYS"        # wait for the next screen
 ax screenshot progress.jpg   # the active display, ready for App Store Connect
+ax screen --audit            # unlabeled and screen-covering elements, then a count
 ```
 
 - **No private frameworks.** It uses the accessibility API, `simctl` and `devicectl` only.
 - **Confirmed actions.** `pose` and `rotate` wait until devicectl reports the new state, and fail with exit code 5 if it never arrives.
+- **Reads what VoiceOver reads.** `ax screen` lists the real accessibility tree of the app, with frames in device points, and flags elements with no name.
 - **Made for agents.** Every command takes `--json`, and each kind of failure has its own exit code. A failed `tap` lists the closest labels on the screen, and when a label matches two different elements, `ax` reports both instead of picking one.
 
 Coding agents: read [AGENTS.md](AGENTS.md), or install the skill with `npx skills add hipporasy/devicehub-ax`.
@@ -77,6 +79,8 @@ ax list | press LABEL           the raw accessibility tree of any app (--app, --
 
 Options: `--json`, `--device UDID|name` (or `AX_DEVICE`), `--timeout SECS`, `--contains`, `--role ROLES`, `--no-verify`, `--frames`, `--audit`. Run `ax --help` for the full list and the exit codes.
 
+With more than one simulator booted, pick one with `--device "iPhone 17"` (or `AX_DEVICE`). The name must match the whole device name, so `iPhone 17` never picks `iPhone 17e`. When no Device Hub window shows that simulator, `ax` selects it in a window's sidebar first; `ax select DEVICE` does only that.
+
 `tap` and `wait` only look at the device's screen, so an app's Home tab never clashes with Device Hub's Home button. Device Hub must have the device's window on screen: a minimised window, a window on another Space, or a locked Mac hides it from the accessibility API.
 
 ## Recipe: iPhone Duo screenshots of the inner display
@@ -90,13 +94,30 @@ ax pose closed && ax screenshot shots/cover.jpg                      # 1398 x 20
 
 App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (2853 x 2007 or 2007 x 2853) and rejects images with an alpha channel. `ax screenshot` writes none: a `.jpg` path gives JPEG at quality 0.95, any other path gives PNG.
 
+## Recipe: accessibility check
+
+```bash
+ax select "iPhone 17"            # show the simulator in Device Hub
+ax tap Continue && ax wait Map   # go to the screen to check
+ax screen --frames               # every element: role, label, identifier, value, frame, flags
+ax screen --audit --json         # only the problems, for a script or an agent
+```
+
+`ax screen` flags two kinds of problem:
+
+- `unlabeled`: an element VoiceOver can land on (a control, a text field, an element with custom actions, or a leaf) that has no name. It is listed as `(no label)`. A text field's placeholder counts as its name.
+- `fullscreen`: an element that is not a container and covers 90% or more of the screen, such as a decorative overlay that VoiceOver should skip.
+
+`--audit` lists only flagged elements and ends with `audit: N unlabeled, M covering the screen`. With `--json`, each element has `unlabeled`, `fullscreen` and `frame` fields, and the result has an `audit` object with both counts. Unnamed containers are not listed, since VoiceOver does not stop on them.
+
 ## Notes
 
-- Tested with Xcode 27.1 (Device Hub) on macOS 27.
+- Tested with Xcode 27.2 (Device Hub) on macOS 27.
 - Device Hub reports a process ID of -1 to `NSWorkspace`, so `ax` finds it in the process table by executable name.
 - Swipes from tools such as AXe or `idb` land on the Duo's outer display; use accessibility presses for the inner display.
 - `ax tap` performs the accessibility press and `ax scroll` scrolls by whole pages; neither can drag or long-press. Swipe actions on rows, such as Delete, are custom actions: `ax screen` lists them and `ax action` runs them.
 - `ax type` sets the field's value rather than pressing keys, so it cannot press Return. Some fields, such as Safari's address bar, only take text after `ax tap` puts them in edit mode.
+- `ax screenshot` warns only when the captured image is black (JSON `"black": true`), for example when the Duo's inner display is off. Single-screen simulators report no display state, so the warning comes from the pixels.
 - devicectl reports no hinge angle, so `ax state` shows Partially Open and Open both as `unfolded`.
 
 ## Releasing
@@ -104,8 +125,8 @@ App Store Connect takes the inner display as the `APP_IPHONE_DUO` display type (
 Bump `version` in `Sources/ax/main.swift`, commit, then push an annotated tag whose message body is the release notes:
 
 ```bash
-git tag -a v0.3.0 -m "v0.3.0" -m "What changed, in Markdown."
-git push origin v0.3.0
+git tag -a v0.5.0 -m "v0.5.0" -m "What changed, in Markdown."
+git push origin v0.5.0
 ```
 
 The release workflow tests and builds the universal binary, publishes the GitHub release with it, and updates the Homebrew formula.
