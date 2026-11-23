@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 
-let version = "0.4.0"
+let version = "0.5.0"
 
 let usage = """
 Usage: ax <command> [options]
@@ -15,11 +15,12 @@ Device:
   pose closed|partial|open  Fold or unfold an iPhone Duo, then wait until the matching display is on
   rotate [TIMES]            Press Rotate Right, then wait until the orientation changes
   screenshot PATH           Capture the active display with no alpha channel (.jpg or .png)
+  select DEVICE             Show a booted simulator (UDID or name) in Device Hub, selecting it in the sidebar
   controls                  List the Device Hub buttons under the device
   control LABEL             Press one of them, e.g. Home, Screenshot, Record
 
 App on the simulator:
-  screen                    List the elements on the device's screen
+  screen                    List the elements on the device's screen (--frames, --audit)
   tap LABEL                 Press an element on the screen by its label or identifier
   wait LABEL                Wait until an element is on the screen (--gone: until it is not)
   action LABEL NAME         Run one of an element's custom actions, such as a row's swipe action (Delete)
@@ -34,7 +35,8 @@ Any app:
 Options:
   --json            Print one JSON object; failures print {"ok": false, "error": ..., "hint": ...}
   --device UDID     Simulator UDID or name. Default: $AX_DEVICE, else the only booted
-                    simulator, else the one in Device Hub's only device window
+                    simulator, else the one in Device Hub's only device window.
+                    A named simulator no window shows is selected in Device Hub's sidebar
   --timeout SECS    How long to wait for an element or state (tap, control, press: 2; others: 10)
   --contains        Match labels by case-insensitive substring instead of exactly
   --role ROLES      Only match these roles, separated by |, e.g. AXRadio or Button|Radio
@@ -44,6 +46,8 @@ Options:
   --append          type: add to the field's text instead of replacing it
   --in LABEL        scroll: the list to scroll, by its label or the label of something in it
   --pages N         scroll: pages to scroll (default 1; with --to, the most to try, default 10)
+  --frames          screen: add each element's frame (x,y wxh, in device points)
+  --audit           screen: list only unlabeled elements and elements covering the screen, then a count
   --no-verify       pose and rotate: do not wait for the device to confirm
   --app NAME        list and press: app name or bundle identifier (default: DeviceHub)
   --pid PID         list and press: process identifier, instead of --app
@@ -71,6 +75,8 @@ struct Options {
     var pages: Int?
     var typeTarget: String?
     var append = false
+    var frames = false
+    var audit = false
 }
 
 func parseOptions() throws -> Options {
@@ -94,6 +100,8 @@ func parseOptions() throws -> Options {
         case "--display": options.display = try value(for: argument)
         case "--into": options.typeTarget = try value(for: argument)
         case "--append": options.append = true
+        case "--frames": options.frames = true
+        case "--audit": options.audit = true
         case "--in": options.scrollContainer = try value(for: argument)
         case "--to": options.scrollTarget = try value(for: argument)
         case "--pages":
@@ -461,25 +469,66 @@ func runScroll(_ options: Options) throws {
 }
 
 func runScreen(_ options: Options) throws {
-    let window = try DeviceHubSession(options).window()
-    let elements = window.screenElements.filter { element in
-        options.roles.map { roles in roles.contains { role(element).contains($0) } } ?? true
+    let session = try DeviceHubSession(options)
+    let window = try session.window()
+    let all = window.screenEntries
+    let displays = (session.simulator ?? (try? requireSimulator(options.device))).flatMap { try? ax.displays(of: $0) } ?? []
+    var rows: [(entry: ScreenElement, frame: CGRect?, fullscreen: Bool)] = all.map { entry in
+        guard let elementFrame = entry.frame, let rootFrame = entry.rootFrame else { return (entry, nil, false) }
+        let points = matchingDisplay(for: rootFrame.size, among: displays)?.pointSize
+        let device = deviceFrame(elementFrame, screen: rootFrame, devicePoints: points)
+        let fullscreen = !containerRoles.contains(role(entry.element)) && coversScreen(elementFrame, screen: rootFrame)
+        return (entry, device, fullscreen)
     }
-    guard !elements.isEmpty || !jsonOutput else {
-        emit(["window": window.dictionary, "elements": []], text: "")
-        return
-    }
-    if window.screenElements.isEmpty {
+    if let roles = options.roles { rows = rows.filter { row in roles.contains { role(row.entry.element).contains($0) } } }
+    let unlabeledCount = rows.filter(\.entry.unlabeled).count, fullscreenCount = rows.filter(\.fullscreen).count
+    if options.audit { rows = rows.filter { $0.entry.unlabeled || $0.fullscreen } }
+    let units = displays.isEmpty ? "window points" : "device points"
+    let audit: [String: Any] = ["unlabeled": unlabeledCount, "fullscreen": fullscreenCount]
+    if all.isEmpty {
         warn("The screen tree is empty. Wait for the app to finish launching, or bring the Device Hub window forward.")
     }
-    emit(["window": window.dictionary, "elements": elements.map(summary)], text: elements.map { element in
+    let elements = rows.map { row -> [String: Any] in
+        var entry = summary(row.entry.element)
+        entry["unlabeled"] = row.entry.unlabeled
+        entry["fullscreen"] = row.fullscreen
+        entry["frame"] = row.frame.map { ["x": $0.minX, "y": $0.minY, "width": $0.width, "height": $0.height] } ?? NSNull()
+        return entry
+    }
+    let lines = rows.map { row -> String in
+        let element = row.entry.element
         var flags: [String] = []
         if isSelected(element) { flags.append("selected") }
         if !isEnabled(element) { flags.append("disabled") }
+        if row.entry.unlabeled { flags.append("unlabeled") }
+        if row.fullscreen { flags.append("fullscreen") }
         let actions = customActions(element).map(\.name)
         if !actions.isEmpty { flags.append("actions: " + actions.joined(separator: "; ")) }
-        return [role(element), displayLabel(element), attribute(element, "AXIdentifier"), attribute(element, kAXValueAttribute), flags.joined(separator: ",")].joined(separator: " | ")
-    }.joined(separator: "\n"))
+        let label = displayLabel(element)
+        var columns = [role(element), label.isEmpty ? "(no label)" : label, attribute(element, "AXIdentifier"), attribute(element, kAXValueAttribute), flags.joined(separator: ",")]
+        if options.frames || options.audit { columns.append(row.frame.map(frameText) ?? "") }
+        return columns.joined(separator: " | ")
+    }
+    var text = lines
+    if options.audit {
+        text.append("audit: \(unlabeledCount) unlabeled, \(fullscreenCount) covering the screen (frames in \(units))")
+    }
+    emit(["window": window.dictionary, "elements": elements, "audit": audit, "frameUnits": units], text: text.joined(separator: "\n"))
+}
+
+/// "x,y wxh", in whole points.
+func frameText(_ frame: CGRect) -> String {
+    "\(Int(frame.minX)),\(Int(frame.minY)) \(Int(frame.width))x\(Int(frame.height))"
+}
+
+/// Shows a booted simulator in Device Hub: selects it in a window's sidebar unless a window already shows it.
+func runSelect(_ options: Options) throws {
+    var options = options
+    options.device = try requireArgument(options, "a DEVICE (UDID or name)")
+    let session = try DeviceHubSession(options)
+    guard let simulator = session.simulator else { throw ambiguousSimulator(try bootedSimulators()) }
+    let window = try session.window()
+    emit(["device": simulator.dictionary, "window": window.dictionary], text: "\(window.title) shows \(simulator.name) (\(simulator.identifier))")
 }
 
 func runControls(_ options: Options) throws {
@@ -499,7 +548,7 @@ func runControl(_ options: Options) throws {
 }
 
 func activeDisplay(_ list: [Display]) -> Display? {
-    list.first(where: \.isOn) ?? list.first(where: \.active)
+    list.first(where: \.isOn) ?? list.first { $0.active == true }
 }
 
 func runPose(_ options: Options) throws {
@@ -618,13 +667,17 @@ func runScreenshot(_ options: Options) throws {
         throw Failure(.usage, "unknown_display", "No \(options.display) display on \(simulator.name).", details: ["displays": list.map(\.dictionary)])
     }
     var payload: [String: Any] = [:]
-    if !display.isOn {
-        let warning = "Display \(display.identifier) (\(display.position)) is off, so the image is probably black."
+    let destination = URL(fileURLWithPath: path)
+    let size = try screenshot(simulator, display: display, to: destination)
+    // The pixels decide: devicectl cannot always tell whether a display is on, and an off display captures black.
+    if size.black {
+        let warning = display.isOn
+            ? "The image is black. The app may still be launching; wait for it, then take the screenshot again."
+            : "The image is black: display \(display.identifier) (\(display.position)) is off. Pick the display that is on with --display, or change the pose."
         warn(warning)
         payload["warning"] = warning
     }
-    let destination = URL(fileURLWithPath: path)
-    let size = try screenshot(simulator, display: display, to: destination)
+    payload["black"] = size.black
     payload.merge(["path": destination.standardizedFileURL.path, "width": size.width, "height": size.height, "display": display.dictionary, "device": simulator.dictionary]) { $1 }
     emit(payload, text: "wrote \(destination.path) (\(size.width)x\(size.height), \(display.position) display)")
 }
@@ -680,6 +733,7 @@ func run(_ options: Options) throws {
     case "scroll": try runScroll(options)
     case "type": try runType(options)
     case "action": try runAction(options)
+    case "select": try runSelect(options)
     case "controls": try runControls(options)
     case "control": try runControl(options)
     case "pose": try runPose(options)

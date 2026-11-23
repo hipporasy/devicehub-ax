@@ -16,20 +16,31 @@ struct Display {
     let identifier: Int
     let uniqueIdentifier: String
     let primary: Bool
-    let active: Bool
+    /// Nil when devicectl does not say: a single-screen simulator reports no `active` key.
+    let active: Bool?
+    /// "activeOn", "off", or "unknown" when devicectl cannot tell, as on a single-screen simulator.
     let backlight: String
     let width: Int
     let height: Int
+    /// Pixels per point, 0 when devicectl does not report it.
+    var pointScale: Double = 0
     let orientation: String
     /// "outer" and "inner" on a foldable device, "main" otherwise.
     var position = "main"
 
-    var isOn: Bool { active && backlight == "activeOn" }
+    /// On unless devicectl says otherwise. An unknown state counts as on: a single-screen simulator
+    /// reports neither `active` nor a backlight state, and its screen is always on.
+    var isOn: Bool { active != false && ["activeOn", "unknown", ""].contains(backlight) }
+
+    /// The display's size in points, when devicectl reports its scale.
+    var pointSize: CGSize? {
+        pointScale > 0 ? CGSize(width: Double(width) / pointScale, height: Double(height) / pointScale) : nil
+    }
 
     var dictionary: [String: Any] {
         [
             "id": identifier, "uniqueId": uniqueIdentifier, "position": position, "primary": primary,
-            "active": active, "backlight": backlight, "width": width, "height": height, "orientation": orientation,
+            "active": active ?? NSNull(), "backlight": backlight, "width": width, "height": height, "orientation": orientation,
         ]
     }
 }
@@ -142,10 +153,11 @@ func parseDisplayInfo(_ data: Data) throws -> (displays: [Display], orientation:
             identifier: entry["displayId"] as? Int ?? 0,
             uniqueIdentifier: entry["uniqueId"] as? String ?? "",
             primary: entry["primary"] as? Bool ?? false,
-            active: entry["active"] as? Bool ?? false,
+            active: entry["active"] as? Bool,
             backlight: entry["backlightState"] as? String ?? "",
             width: size.first ?? 0,
             height: size.last ?? 0,
+            pointScale: (entry["pointScale"] as? NSNumber)?.doubleValue ?? 0,
             orientation: entry["currentOrientation"] as? String ?? ""
         )
     }
@@ -157,7 +169,7 @@ func parseDisplayInfo(_ data: Data) throws -> (displays: [Display], orientation:
 
 /// Screenshots one display and writes it with no alpha channel, as App Store Connect requires.
 /// A .jpg or .jpeg path is written as JPEG at quality 0.95, anything else as PNG.
-func screenshot(_ simulator: Simulator, display: Display, to destination: URL) throws -> (width: Int, height: Int) {
+func screenshot(_ simulator: Simulator, display: Display, to destination: URL) throws -> (width: Int, height: Int, black: Bool) {
     let capture = FileManager.default.temporaryDirectory.appendingPathComponent("ax-\(UUID().uuidString).png")
     defer { try? FileManager.default.removeItem(at: capture) }
     _ = try xcrun(["simctl", "io", simulator.identifier, "screenshot", "--display=\(display.identifier)", capture.path])
@@ -186,5 +198,41 @@ func screenshot(_ simulator: Simulator, display: Display, to destination: URL) t
     guard CGImageDestinationFinalize(output) else {
         throw Failure(.actionFailed, "screenshot_write_failed", "Could not write \(destination.path).")
     }
-    return (width, height)
+    return (width, height, isBlack(opaque))
+}
+
+/// True when every sampled pixel is near black: what a display that is off or still waking produces.
+/// Samples a 64 by 64 grid, so a dark app with any light text or icon still reads as not black.
+func isBlack(_ image: CGImage, threshold: UInt8 = 12) -> Bool {
+    let side = 64
+    guard let context = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: side * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else {
+        return false
+    }
+    context.interpolationQuality = .none
+    context.draw(image, in: CGRect(x: 0, y: 0, width: side, height: side))
+    guard let data = context.data else { return false }
+    let pixels = data.bindMemory(to: UInt8.self, capacity: side * side * 4)
+    return isBlack(UnsafeBufferPointer(start: pixels, count: side * side * 4), threshold: threshold)
+}
+
+/// True when every red, green and blue byte in RGBX pixel data is at most `threshold`.
+func isBlack(_ rgbx: UnsafeBufferPointer<UInt8>, threshold: UInt8 = 12) -> Bool {
+    stride(from: 0, to: rgbx.count - 3, by: 4).allSatisfy { index in
+        rgbx[index] <= threshold && rgbx[index + 1] <= threshold && rgbx[index + 2] <= threshold
+    }
+}
+
+/// The display a screen of this size shows: the one whose shape is closest, preferring a display that is on.
+/// Device Hub draws each display scaled, so the shape, not the size, identifies it.
+func matchingDisplay(for screen: CGSize, among displays: [Display]) -> Display? {
+    guard screen.width > 0, screen.height > 0 else { return nil }
+    let ratio = screen.width / screen.height
+    func distance(_ display: Display) -> Double {
+        guard display.width > 0, display.height > 0 else { return .infinity }
+        // A rotated display is drawn on its side.
+        let shape = Double(display.width) / Double(display.height)
+        return min(abs(shape - ratio), abs(1 / shape - ratio))
+    }
+    return displays.filter { distance($0).isFinite }.min { (distance($0), $0.isOn ? 0 : 1) < (distance($1), $1.isOn ? 0 : 1) }
 }

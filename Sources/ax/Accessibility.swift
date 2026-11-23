@@ -137,7 +137,7 @@ func editDistance(_ first: [Character], _ second: [Character]) -> Int {
 }
 
 /// Roles a person taps on purpose. Device Hub gives every screen element a press action, even static text.
-private let interactiveRoles: Set<String> = [
+let interactiveRoles: Set<String> = [
     kAXButtonRole, kAXRadioButtonRole, kAXCheckBoxRole, kAXMenuItemRole, kAXPopUpButtonRole, kAXTextFieldRole, "AXLink", "AXSwitch", "AXToggle",
 ]
 
@@ -221,4 +221,53 @@ func applicationElement(appName: String, processIdentifier: pid_t?) throws -> AX
         )
     }
     return application
+}
+
+// MARK: - Frames and audit
+
+/// The element's frame in Mac screen coordinates, or nil when it reports no position or size.
+func frame(_ element: AXUIElement) -> CGRect? {
+    var position: CFTypeRef?, size: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &position) == .success,
+          AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &size) == .success,
+          let position, let size,
+          CFGetTypeID(position) == AXValueGetTypeID(), CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
+    var point = CGPoint.zero, extent = CGSize.zero
+    guard AXValueGetValue(position as! AXValue, .cgPoint, &point), AXValueGetValue(size as! AXValue, .cgSize, &extent) else { return nil }
+    return CGRect(origin: point, size: extent)
+}
+
+/// Maps `frame`, in Mac screen coordinates, into the device screen's coordinates: points from its top left.
+/// With `devicePoints`, the device screen's size in points, the result is in device points; without, in window points.
+func deviceFrame(_ frame: CGRect, screen: CGRect, devicePoints: CGSize?) -> CGRect {
+    let scaleX = devicePoints.map { screen.width > 0 ? $0.width / screen.width : 1 } ?? 1
+    let scaleY = devicePoints.map { screen.height > 0 ? $0.height / screen.height : 1 } ?? 1
+    return CGRect(
+        x: ((frame.minX - screen.minX) * scaleX).rounded(), y: ((frame.minY - screen.minY) * scaleY).rounded(),
+        width: (frame.width * scaleX).rounded(), height: (frame.height * scaleY).rounded()
+    )
+}
+
+/// True when `frame` covers at least `threshold` of the screen's area: a button or label that big is
+/// usually a frame bug, such as a hit area that grew to the whole screen.
+func coversScreen(_ frame: CGRect, screen: CGRect, threshold: Double = 0.9) -> Bool {
+    guard screen.width > 0, screen.height > 0 else { return false }
+    let overlap = frame.intersection(screen)
+    guard !overlap.isNull else { return false }
+    return Double(overlap.width * overlap.height) >= threshold * Double(screen.width * screen.height)
+}
+
+/// Roles that only group other elements. A big one is expected, so it is never flagged as full screen.
+let containerRoles: Set<String> = ["AXGroup", "AXScrollArea", "AXList", "AXOutline", "AXTable", "AXWebArea", "AXSplitGroup", "AXLayoutArea"]
+
+/// Whether `ax screen` lists an element, and whether it lacks a name a person would hear.
+///
+/// A named element is listed. So is one with no name that a person can reach: a control, an element with custom
+/// actions, a text field, or a leaf (iOS exposes an accessibility element as a leaf, a container as its children).
+/// Those are flagged as unlabeled, since VoiceOver lands on them with nothing to read. Unnamed containers are dropped.
+func listing(role: String, label: String, identifier: String, value: String, interactive: Bool, hasActions: Bool, isLeaf: Bool) -> (listed: Bool, unlabeled: Bool) {
+    let reachable = interactive || hasActions || textRoles.contains(role) || (isLeaf && !containerRoles.contains(role))
+    if !label.isEmpty { return (true, false) }
+    if reachable { return (true, value.isEmpty || interactive) }
+    return (!identifier.isEmpty || !value.isEmpty, false)
 }

@@ -23,6 +23,7 @@ If `ax doctor` reports `accessibility` as failing, stop and ask the user to enab
 
 ```bash
 ax screen                          # what is on the device's screen
+ax screen --audit                  # only unlabeled elements and ones covering the screen, with frames
 ax tap "Continue"                  # press by label or identifier
 ax wait "Welcome"                  # wait for the next screen (default 10 s)
 ax wait "Loading" --gone --timeout 30
@@ -43,7 +44,9 @@ ax rotate                          # one quarter turn right, confirmed
 ax control Home                    # Device Hub's own buttons: see `ax controls`
 ```
 
-With several simulators booted and more than one Device Hub window open, run `export AX_DEVICE=<UDID>` once, or pass `--device <UDID>` to each command.
+With several simulators booted, run `export AX_DEVICE=<UDID>` once, or pass `--device <UDID>` to each command. A named simulator that no Device Hub window shows is selected in the sidebar; `ax select <UDID or name>` does only that.
+
+For accessibility checks, `ax screen` lists an element VoiceOver can land on with no name as `(no label)`, flagged `unlabeled`, and flags a control whose frame covers the screen as `fullscreen`. `--frames` shows each frame in device points.
 
 ## Exit codes
 

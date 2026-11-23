@@ -43,7 +43,7 @@ ax action "Groceries" Delete         # a row's swipe action, without swiping
 |---|---|
 | `ax doctor` | Checks the setup, with a fix for each failure. |
 | `ax state` | Device, pose (`closed`, `unfolded` or `n/a`), orientation and displays. |
-| `ax screen` | Elements on the device's screen: `role \| label \| identifier \| value \| flags`. Flags include `selected`, `disabled` and the element's custom actions. Duplicates and unnamed containers are dropped. |
+| `ax screen` | Elements on the device's screen: `role \| label \| identifier \| value \| flags`. Flags include `selected`, `disabled`, `unlabeled`, `fullscreen` and the element's custom actions. An element with no name that VoiceOver can land on (a control, an element with custom actions, a text field or a leaf) is listed as `(no label)` and flagged `unlabeled`; duplicates and unnamed containers are dropped. `--frames` adds each element's frame (`x,y wxh` in device points); JSON always has `frame`. An element that is not a container and covers at least 90% of the screen is flagged `fullscreen`, which usually means a frame bug. `--audit` lists only the flagged elements, then a count. |
 | `ax tap LABEL` | Presses an element on the screen. It matches title, description, identifier and help exactly; `--contains` matches a case-insensitive substring. Buttons and tabs win over text with the same label. Different elements that match is an error, not a guess. |
 | `ax wait LABEL` | Waits until the element is on the screen (default 10 s); with `--gone`, until it is not. |
 | `ax scroll [down\|up\|left\|right]` | Scrolls a list on the screen by a page (`--pages N`). With `--to LABEL`, keeps scrolling until LABEL is on the screen (at most 10 pages by default). Stops at the end of the list. A screen with several lists, such as a sidebar and its detail, scrolls the first one that moves; `--in LABEL` picks the list by its label or the label of something in it. |
@@ -51,13 +51,14 @@ ax action "Groceries" Delete         # a row's swipe action, without swiping
 | `ax type TEXT` | Sets the text of the text field on the screen, then reads it back. `--into LABEL` picks the field by label, identifier or placeholder; without it, the field must be the only one or the focused one. `--append` adds to the text instead of replacing it. |
 | `ax pose closed\|partial\|open` | Presses the pose button and waits until the matching display is on. |
 | `ax rotate [N]` | Presses Rotate Right N times, confirming each quarter turn. |
-| `ax screenshot PATH` | Captures the active display (`--display inner\|outer\|ID` to pick one). A `.jpg` path writes JPEG; any other path writes PNG. Neither has an alpha channel. |
+| `ax screenshot PATH` | Captures the active display (`--display inner\|outer\|ID` to pick one). A `.jpg` path writes JPEG; any other path writes PNG. Neither has an alpha channel. It warns, and JSON has `"black": true`, only when the image itself is black. |
+| `ax select DEVICE` | Shows a booted simulator (UDID or name) in Device Hub, selecting it in a window's sidebar unless a window already shows it, and waits until its screen is there. |
 | `ax controls` / `ax control LABEL` | Lists or presses Device Hub's own buttons under the device: Home, Screenshot, Record, Rotate Right, Closed, Partially Open, Open. |
 | `ax list` / `ax press LABEL` | The raw accessibility tree, and a press anywhere in it. Use these for apps other than Device Hub (`--app`, `--pid`). |
 
-Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--display WHICH`, `--no-verify`, `--to LABEL`, `--in LABEL`, `--pages N`, `--into LABEL`, `--append`.
+Options: `--json`, `--device UDID|name`, `--timeout SECS`, `--contains`, `--role ROLES`, `--display WHICH`, `--no-verify`, `--to LABEL`, `--in LABEL`, `--pages N`, `--into LABEL`, `--append`, `--frames`, `--audit`.
 
-`ax` picks the simulator in this order: `--device`, then the `AX_DEVICE` environment variable, then the only booted simulator, then the simulator in Device Hub's only device window. If none of these settles it, `ax` refuses rather than guess, and lists the booted simulators.
+`ax` picks the simulator in this order: `--device`, then the `AX_DEVICE` environment variable, then the only booted simulator, then the simulator in Device Hub's only device window. If none of these settles it, `ax` refuses rather than guess, and lists the booted simulators. A simulator named with `--device` or `AX_DEVICE` that no Device Hub window shows is selected in a window's sidebar first; the sidebar must be showing.
 
 ## Output and exit codes
 
@@ -71,8 +72,8 @@ Sometimes Device Hub does not answer a press because the app is already changing
 | 1 | `not_found`, `not_scrollable` | No element matched; try one of `candidates` |
 | 2 | `usage`, `ambiguous`, `ambiguous_device`, `unknown_device` | Fix the command |
 | 3 | `accessibility_denied` | Ask the user for Accessibility access |
-| 4 | `app_not_running`, `no_device_window`, `no_booted_simulator`, `app_not_responding` | Device Hub, its window or the simulator is missing |
-| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed`, `scroll_failed`, `type_failed`, `type_not_confirmed`, `action_failed` | The action did not take effect |
+| 4 | `app_not_running`, `no_device_window`, `no_device_row`, `no_booted_simulator`, `app_not_responding` | Device Hub, its window or the simulator is missing |
+| 5 | `pose_not_confirmed`, `rotation_not_confirmed`, `disabled`, `still_present`, `press_failed`, `scroll_failed`, `type_failed`, `type_not_confirmed`, `action_failed`, `select_failed`, `select_not_confirmed` | The action did not take effect |
 | 6 | `simulator_tool_failed` | `simctl` or `devicectl` failed |
 
 ## Gotchas
